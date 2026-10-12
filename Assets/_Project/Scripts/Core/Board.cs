@@ -17,6 +17,8 @@ namespace Sokoban.Core
 
         public int Width { get; }
         public int Height { get; }
+        public int BoxCount => _startBoxes.Length;
+        public int GoalCount { get; }
         public GridPos Player { get; private set; }
         public int MoveCount => _history.Count;
         public int PushCount { get; private set; }
@@ -37,6 +39,8 @@ namespace Sokoban.Core
             }
             _startPlayer = player;
             Player = player;
+            foreach (bool goal in goals)
+                if (goal) GoalCount++;
         }
 
         public bool InBounds(GridPos p) => p.X >= 0 && p.Y >= 0 && p.X < Width && p.Y < Height;
@@ -65,6 +69,28 @@ namespace Sokoban.Core
                     if (_boxes[x, y] && !_goals[x, y]) return false;
                 return true;
             }
+        }
+
+        /// <summary>
+        /// 从玩家初始位置出发、不穿墙能到达的所有格子（忽略箱子），即关卡的"室内"区域。
+        /// 表现层只给这些格子铺地板，墙外的空白不画。
+        /// </summary>
+        public bool[,] GetInterior()
+        {
+            var inside = new bool[Width, Height];
+            var stack = new Stack<GridPos>();
+            stack.Push(_startPlayer);
+            while (stack.Count > 0)
+            {
+                GridPos p = stack.Pop();
+                if (IsWall(p) || inside[p.X, p.Y]) continue;
+                inside[p.X, p.Y] = true;
+                stack.Push(p + Direction.Up.ToOffset());
+                stack.Push(p + Direction.Down.ToOffset());
+                stack.Push(p + Direction.Left.ToOffset());
+                stack.Push(p + Direction.Right.ToOffset());
+            }
+            return inside;
         }
 
         public MoveResult TryMove(Direction direction)

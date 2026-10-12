@@ -286,6 +286,34 @@ namespace Sokoban.Tests
             Assert.IsFalse(board.CanUndo);
         }
 
+        // ---------- 统计 / 室内区域 ----------
+
+        [Test]
+        public void Counts_BoxesAndGoals()
+        {
+            Board board = Parse("#@$*..#");
+
+            Assert.AreEqual(2, board.BoxCount);
+            Assert.AreEqual(3, board.GoalCount);
+        }
+
+        [Test]
+        public void GetInterior_ExcludesSpaceOutsideWalls()
+        {
+            Board board = Parse(
+                "  ###",
+                "###@#",
+                "#$ .#",
+                "#####");
+
+            bool[,] inside = board.GetInterior();
+
+            Assert.IsFalse(inside[0, 0], "outside the walls");
+            Assert.IsTrue(inside[3, 1], "player cell");
+            Assert.IsTrue(inside[1, 2], "box cell counts as interior");
+            Assert.IsFalse(inside[0, 2], "wall");
+        }
+
         // ---------- 序列化 ----------
 
         [Test]
