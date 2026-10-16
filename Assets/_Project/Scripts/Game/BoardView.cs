@@ -5,13 +5,16 @@ using UnityEngine;
 namespace Sokoban.Game
 {
     /// <summary>
-    /// 把 Board 画出来并播放移动动画。只读取 Board，从不修改它。
+    /// 把 Board 画出来并播放动画。只读取 Board，从不修改它。
     /// 逻辑在按键时就已经生效，这里的动画只是"追赶"逻辑状态；
     /// 撤销 / 重开时直接 SyncToBoard 对齐，因此画面永远不会和逻辑错位。
     /// </summary>
     public sealed class BoardView : MonoBehaviour
     {
         private const float MoveDuration = 0.12f;
+        private const float BumpDuration = 0.12f;
+        private const float BumpDistance = 0.12f;
+        private const float CelebrateDuration = 0.45f;
 
         private const int OrderFloor = 0;
         private const int OrderGoal = 1;
@@ -31,8 +34,12 @@ namespace Sokoban.Game
         private readonly Dictionary<GridPos, SpriteRenderer> _boxes = new Dictionary<GridPos, SpriteRenderer>();
         private readonly List<Tween> _tweens = new List<Tween>();
         private float _elapsed = MoveDuration;
+        private Vector3 _bumpOffset;
+        private float _bumpElapsed = BumpDuration;
+        private float _celebrateElapsed = CelebrateDuration;
 
-        public bool IsAnimating => _elapsed < MoveDuration;
+        /// <summary>移动或撞墙动画播放中。播放期间输入会被缓存，等动画结束再执行。</summary>
+        public bool IsAnimating => _elapsed < MoveDuration || _bumpElapsed < BumpDuration;
 
         public void Build(Board board)
         {
@@ -65,19 +72,19 @@ namespace Sokoban.Game
 
         public void Clear()
         {
-            for (int i = transform.childCount - 1; i >= 0; i--)
-                Destroy(transform.GetChild(i).gameObject);
+            UIFactory.ClearChildren(transform);
             _boxes.Clear();
             _tweens.Clear();
             _player = null;
             _board = null;
-            _elapsed = MoveDuration;
+            ResetAnimations();
         }
 
         /// <summary>为一次成功的移动播放动画。</summary>
         public void Animate(MoveResult move)
         {
             CompleteTweens();
+            _bumpElapsed = BumpDuration;
             if (move.Kind == MoveKind.Blocked) return;
 
             AddTween(_player.transform, move.PlayerTo);
@@ -92,11 +99,27 @@ namespace Sokoban.Game
             _elapsed = 0f;
         }
 
+        /// <summary>撞墙 / 推不动时，角色朝那个方向轻轻顶一下再弹回来。</summary>
+        public void Bump(Direction direction)
+        {
+            if (_player == null) return;
+            CompleteTweens();
+            GridPos offset = direction.ToOffset();
+            _bumpOffset = new Vector3(offset.X, -offset.Y, 0f) * BumpDistance;
+            _bumpElapsed = 0f;
+        }
+
+        /// <summary>通关时所有箱子一起弹跳一下。</summary>
+        public void Celebrate()
+        {
+            _celebrateElapsed = 0f;
+        }
+
         /// <summary>立即停止动画，把所有物体摆到 Board 当前的位置（用于撤销、重开）。</summary>
         public void SyncToBoard()
         {
             _tweens.Clear();
-            _elapsed = MoveDuration;
+            ResetAnimations();
             _player.transform.localPosition = GridToLocal(_board.Player);
 
             var renderers = new List<SpriteRenderer>(_boxes.Values);
@@ -106,6 +129,7 @@ namespace Sokoban.Game
             {
                 SpriteRenderer box = renderers[i++];
                 box.transform.localPosition = GridToLocal(p);
+                box.transform.localScale = Vector3.one;
                 _boxes[p] = box;
             }
             RefreshBoxSprites();
@@ -113,13 +137,40 @@ namespace Sokoban.Game
 
         private void Update()
         {
-            if (!IsAnimating) return;
+            if (_board == null) return;
+            float dt = Time.deltaTime;
 
-            _elapsed += Time.deltaTime;
-            float t = Mathf.Clamp01(_elapsed / MoveDuration);
-            t = t * t * (3f - 2f * t); // 缓入缓出
-            foreach (Tween tween in _tweens)
-                tween.Target.localPosition = Vector3.LerpUnclamped(tween.From, tween.To, t);
+            if (_elapsed < MoveDuration)
+            {
+                _elapsed += dt;
+                float t = Mathf.Clamp01(_elapsed / MoveDuration);
+                t = t * t * (3f - 2f * t); // 缓入缓出
+                foreach (Tween tween in _tweens)
+                    tween.Target.localPosition = Vector3.LerpUnclamped(tween.From, tween.To, t);
+            }
+
+            if (_bumpElapsed < BumpDuration)
+            {
+                _bumpElapsed += dt;
+                float t = Mathf.Clamp01(_bumpElapsed / BumpDuration);
+                _player.transform.localPosition = GridToLocal(_board.Player) + _bumpOffset * Mathf.Sin(t * Mathf.PI);
+            }
+
+            if (_celebrateElapsed < CelebrateDuration)
+            {
+                _celebrateElapsed += dt;
+                float t = Mathf.Clamp01(_celebrateElapsed / CelebrateDuration);
+                Vector3 scale = Vector3.one * (1f + 0.2f * Mathf.Sin(t * Mathf.PI));
+                foreach (SpriteRenderer box in _boxes.Values)
+                    box.transform.localScale = scale;
+            }
+        }
+
+        private void ResetAnimations()
+        {
+            _elapsed = MoveDuration;
+            _bumpElapsed = BumpDuration;
+            _celebrateElapsed = CelebrateDuration;
         }
 
         private void CompleteTweens()
@@ -127,6 +178,7 @@ namespace Sokoban.Game
             foreach (Tween tween in _tweens)
                 tween.Target.localPosition = tween.To;
             _tweens.Clear();
+            _elapsed = MoveDuration;
         }
 
         private void AddTween(Transform target, GridPos to)

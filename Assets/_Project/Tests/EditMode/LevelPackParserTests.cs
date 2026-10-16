@@ -51,8 +51,8 @@ namespace Sokoban.Tests
         {
             var levels = LevelPackParser.Parse("#@#\n\n#@#");
 
-            Assert.AreEqual("Level 1", levels[0].name);
-            Assert.AreEqual("Level 2", levels[1].name);
+            Assert.AreEqual("关卡 1", levels[0].name);
+            Assert.AreEqual("关卡 2", levels[1].name);
         }
 
         [Test]

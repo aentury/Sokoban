@@ -13,6 +13,7 @@ namespace Sokoban.Game
     public sealed class GameController : MonoBehaviour
     {
         private const float RepeatDelay = 0.22f;
+        private const float WinDelay = 0.6f;
         private const float VerticalMargin = 3f;   // 相机上下留出的格数（给 HUD 留空间）
         private const float HorizontalMargin = 1f;
 
@@ -43,6 +44,7 @@ namespace Sokoban.Game
         private Direction? _held;
         private float _holdTimer;
         private bool _won;
+        private float _winTimer;
         private int _screenWidth;
         private int _screenHeight;
 
@@ -91,7 +93,18 @@ namespace Sokoban.Game
         {
             if (Board == null) return;
             if (Screen.width != _screenWidth || Screen.height != _screenHeight) FitCamera();
-            if (!InputEnabled || _won) return;
+
+            if (_won)
+            {
+                // 通关后先播放庆祝动画，稍等片刻再通知外部弹出结算面板
+                if (_winTimer > 0f)
+                {
+                    _winTimer -= Time.deltaTime;
+                    if (_winTimer <= 0f) Won?.Invoke(Board.MoveCount);
+                }
+                return;
+            }
+            if (!InputEnabled) return;
 
             if (Input.GetKeyDown(KeyCode.Z)) Undo();
             if (Input.GetKeyDown(KeyCode.R)) Restart();
@@ -103,30 +116,46 @@ namespace Sokoban.Game
             if (Board.IsSolved)
             {
                 _won = true;
-                Won?.Invoke(Board.MoveCount);
+                _winTimer = WinDelay;
+                _view.Celebrate();
+                Sfx.Play("win");
                 return;
             }
 
-            Direction? next = null;
             if (_buffered.HasValue)
             {
-                next = _buffered;
+                Direction direction = _buffered.Value;
                 _buffered = null;
+                Move(direction, true);
             }
             else if (_held.HasValue && _holdTimer <= 0f)
             {
-                next = _held;
+                Move(_held.Value, false);
             }
+        }
 
-            if (next.HasValue)
+        /// <summary>执行一步并播放对应的动画和音效。撞墙反馈只在"新按下"时播放，按住不放撞墙不会一直响。</summary>
+        private void Move(Direction direction, bool freshPress)
+        {
+            MoveResult result = Board.TryMove(direction);
+            switch (result.Kind)
             {
-                MoveResult result = Board.TryMove(next.Value);
-                if (result.Kind != MoveKind.Blocked)
-                {
-                    _view.Animate(result);
-                    StateChanged?.Invoke();
-                }
+                case MoveKind.Blocked:
+                    if (freshPress)
+                    {
+                        _view.Bump(direction);
+                        Sfx.Play("blocked", 0.7f);
+                    }
+                    return;
+                case MoveKind.Walked:
+                    Sfx.Play("step", 0.5f);
+                    break;
+                case MoveKind.Pushed:
+                    Sfx.Play(Board.IsGoal(result.BoxTo) ? "goal" : "push");
+                    break;
             }
+            _view.Animate(result);
+            StateChanged?.Invoke();
         }
 
         private void ReadMovementKeys()

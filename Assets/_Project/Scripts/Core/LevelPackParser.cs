@@ -7,7 +7,7 @@ namespace Sokoban.Core
     ///   ; 关卡标题
     ///   XSB 行...
     ///   （空行分隔下一个关卡）
-    /// 没写标题的关卡自动命名为 "Level N"。这里只负责切分，关卡内容是否合法由 LevelParser 检查。
+    /// 没写标题的关卡自动命名为"关卡 N"。这里只负责切分，关卡内容是否合法由 LevelParser 检查。
     /// </summary>
     public static class LevelPackParser
     {
@@ -44,7 +44,7 @@ namespace Sokoban.Core
             if (rows.Count == 0) return;
             levels.Add(new LevelData
             {
-                name = string.IsNullOrEmpty(title) ? $"Level {levels.Count + 1}" : title,
+                name = string.IsNullOrEmpty(title) ? $"关卡 {levels.Count + 1}" : title,
                 rows = rows.ToArray()
             });
             rows.Clear();

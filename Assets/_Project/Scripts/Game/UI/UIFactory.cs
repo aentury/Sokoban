@@ -12,7 +12,25 @@ namespace Sokoban.Game
     public static class UIFactory
     {
         private static Font _font;
-        private static Font Font => _font != null ? _font : (_font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf"));
+
+        /// <summary>
+        /// 界面字体：随项目附带的思源黑体子集（Resources/Fonts/NotoSansSC，含常用简体汉字），
+        /// 保证在没有安装中文字体的电脑上也能正常显示。缺失时退回 Unity 内置字体。
+        /// </summary>
+        private static Font Font
+        {
+            get
+            {
+                if (_font != null) return _font;
+                _font = Resources.Load<Font>("Fonts/NotoSansSC");
+                if (_font == null)
+                {
+                    Debug.LogWarning("Missing font Resources/Fonts/NotoSansSC, falling back to the built-in font.");
+                    _font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                }
+                return _font;
+            }
+        }
         private static Sprite RoundedSprite => SpriteLibrary.GetUISprite("ui_rounded", 20f);
 
         public static Canvas CreateCanvas(Transform parent)
@@ -117,7 +135,7 @@ namespace Sokoban.Game
         }
 
         public static Button CreateButton(Transform parent, string label, Action onClick,
-            float width = 360f, float height = 76f, bool primary = false)
+            float width = 360f, float height = 76f, bool primary = false, int fontSize = 32)
         {
             Image image = CreateImage(parent, (label ?? "Level") + " Button", Color.white, true);
             RectTransform rect = image.rectTransform;
@@ -129,30 +147,48 @@ namespace Sokoban.Game
             // 禁用方向键导航：方向键用于控制角色，不应该切换按钮焦点
             button.navigation = new Navigation { mode = Navigation.Mode.None };
 
-            Color normal = primary ? Palette.Accent : Palette.Button;
+            if (!string.IsNullOrEmpty(label))
+            {
+                Text text = CreateText(rect, label, fontSize, Palette.Text);
+                Stretch(text.rectTransform);
+            }
+
             ColorBlock colors = button.colors;
-            colors.normalColor = normal;
-            colors.selectedColor = normal;
-            colors.highlightedColor = Color.Lerp(normal, Color.white, 0.15f);
-            colors.pressedColor = Color.Lerp(normal, Color.black, 0.2f);
             colors.disabledColor = Palette.ButtonDisabled;
             colors.colorMultiplier = 1f;
             colors.fadeDuration = 0.08f;
             button.colors = colors;
-
-            if (!string.IsNullOrEmpty(label))
-            {
-                Text text = CreateText(rect, label, 32, primary ? Palette.TextOnAccent : Palette.Text);
-                Stretch(text.rectTransform);
-            }
+            SetHighlighted(button, primary);
 
             button.onClick.AddListener(() =>
             {
                 // 点击后取消选中，避免之后按回车 / 空格再次触发这个按钮
                 if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(null);
+                Sfx.Play("click", 0.6f);
                 onClick();
             });
             return button;
+        }
+
+        /// <summary>高亮（主按钮 / 当前选中的工具）用强调色，否则用普通按钮色。</summary>
+        public static void SetHighlighted(Button button, bool highlighted)
+        {
+            Color normal = highlighted ? Palette.Accent : Palette.Button;
+            ColorBlock colors = button.colors;
+            colors.normalColor = normal;
+            colors.selectedColor = normal;
+            colors.highlightedColor = Color.Lerp(normal, Color.white, 0.15f);
+            colors.pressedColor = Color.Lerp(normal, Color.black, 0.2f);
+            button.colors = colors;
+
+            Text label = button.GetComponentInChildren<Text>();
+            if (label != null) label.color = highlighted ? Palette.TextOnAccent : Palette.Text;
+        }
+
+        public static void SetButtonLabel(Button button, string label)
+        {
+            Text text = button.GetComponentInChildren<Text>();
+            if (text != null) text.text = label;
         }
 
         public static Slider CreateSlider(Transform parent, float value, Action<float> onChanged, float width = 420f)
@@ -193,6 +229,32 @@ namespace Sokoban.Game
             return slider;
         }
 
+        public static InputField CreateInputField(Transform parent, string placeholder, float width, float height)
+        {
+            Image background = CreateImage(parent, "Input Field", Palette.Input, true);
+            background.rectTransform.sizeDelta = new Vector2(width, height);
+            SetPreferredSize(background.gameObject, width, height);
+
+            Text text = CreateText(background.rectTransform, "", 28, Palette.Text, TextAnchor.MiddleLeft);
+            text.supportRichText = false;
+            text.horizontalOverflow = HorizontalWrapMode.Wrap;
+            text.verticalOverflow = VerticalWrapMode.Truncate;
+            SetInnerPadding(text.rectTransform, 16f);
+
+            Text hint = CreateText(background.rectTransform, placeholder, 28, Palette.TextDim, TextAnchor.MiddleLeft);
+            hint.fontStyle = FontStyle.Italic;
+            SetInnerPadding(hint.rectTransform, 16f);
+
+            var input = background.gameObject.AddComponent<InputField>();
+            input.textComponent = text;
+            input.placeholder = hint;
+            input.targetGraphic = background;
+            input.lineType = InputField.LineType.SingleLine;
+            input.characterLimit = 24;
+            input.navigation = new Navigation { mode = Navigation.Mode.None };
+            return input;
+        }
+
         // ---------- 布局 ----------
 
         /// <summary>纵向排列子物体并自动适应内容大小的容器。</summary>
@@ -213,6 +275,55 @@ namespace Sokoban.Game
             ConfigureLayout(layout, spacing, 0);
             AddFitter(rect.gameObject);
             return rect;
+        }
+
+        /// <summary>固定列数的网格，常用于一排排同样大小的按钮。</summary>
+        public static RectTransform CreateGrid(Transform parent, Vector2 cellSize, int columns, float spacing)
+        {
+            RectTransform rect = CreateRect("Grid", parent);
+            var grid = rect.gameObject.AddComponent<GridLayoutGroup>();
+            grid.cellSize = cellSize;
+            grid.spacing = new Vector2(spacing, spacing);
+            grid.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
+            grid.constraintCount = columns;
+            grid.childAlignment = TextAnchor.MiddleCenter;
+            return rect;
+        }
+
+        /// <summary>可以用鼠标滚轮 / 拖动滚动的纵向列表。返回列表根节点，content 用来放列表项。</summary>
+        public static RectTransform CreateScrollList(Transform parent, out RectTransform content)
+        {
+            RectTransform root = CreateRect("Scroll List", parent);
+            var scroll = root.gameObject.AddComponent<ScrollRect>();
+
+            RectTransform viewport = CreateRect("Viewport", root);
+            Stretch(viewport);
+            viewport.gameObject.AddComponent<RectMask2D>();
+            // 透明背景让空白处也能接收滚轮和拖动
+            viewport.gameObject.AddComponent<Image>().color = Color.clear;
+
+            content = CreateRect("Content", viewport);
+            content.anchorMin = new Vector2(0f, 1f);
+            content.anchorMax = Vector2.one;
+            content.pivot = new Vector2(0.5f, 1f);
+            content.sizeDelta = Vector2.zero;
+            var layout = content.gameObject.AddComponent<VerticalLayoutGroup>();
+            layout.spacing = 12f;
+            layout.childAlignment = TextAnchor.UpperCenter;
+            layout.childControlWidth = true;
+            layout.childControlHeight = true;
+            layout.childForceExpandWidth = true;
+            layout.childForceExpandHeight = false;
+            var fitter = content.gameObject.AddComponent<ContentSizeFitter>();
+            fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+            scroll.content = content;
+            scroll.viewport = viewport;
+            scroll.horizontal = false;
+            scroll.vertical = true;
+            scroll.movementType = ScrollRect.MovementType.Clamped;
+            scroll.scrollSensitivity = 40f;
+            return root;
         }
 
         public static void CreateSpacer(Transform parent, float height)
@@ -238,6 +349,24 @@ namespace Sokoban.Game
             image.type = Image.Type.Sliced;
             image.color = Palette.Card;
             return card;
+        }
+
+        /// <summary>删除容器下的所有子物体（先隐藏，避免在销毁前这一帧还参与布局）。</summary>
+        public static void ClearChildren(Transform parent)
+        {
+            for (int i = parent.childCount - 1; i >= 0; i--)
+            {
+                GameObject child = parent.GetChild(i).gameObject;
+                child.SetActive(false);
+                UnityEngine.Object.Destroy(child);
+            }
+        }
+
+        private static void SetInnerPadding(RectTransform rect, float padding)
+        {
+            Stretch(rect);
+            rect.offsetMin = new Vector2(padding, 0f);
+            rect.offsetMax = new Vector2(-padding, 0f);
         }
 
         private static void ConfigureLayout(HorizontalOrVerticalLayoutGroup layout, float spacing, int padding)

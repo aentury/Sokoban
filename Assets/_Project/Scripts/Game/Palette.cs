@@ -14,6 +14,8 @@ namespace Sokoban.Game
         public static readonly Color TextOnAccent = Hex("#2A1E0C");
         public static readonly Color Accent = Hex("#F2A541");
         public static readonly Color Success = Hex("#6DBF73");
+        public static readonly Color Error = Hex("#E8737B");
+        public static readonly Color Input = Hex("#1A1E28");
         public static readonly Color Button = Hex("#3B4458");
         public static readonly Color ButtonDisabled = Hex("#262B37");
 
